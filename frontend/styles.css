@@ -20,4 +20,4 @@
 @media(max-width:760px){nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 10px;overflow:visible;padding-bottom:5px}nav a{text-align:center;min-height:42px;padding:11px 0}.availability-chart text{font-size:18px}}
 
 body[data-page="contacts"] main{min-height:0;padding-bottom:28px}body[data-page="contacts"] .contact-grid{margin-bottom:0}
-#analytics-counters{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.analytics-services{display:flex;flex-direction:column;gap:5px;font-size:11px}.analytics-services a:hover{text-decoration:underline}
+#analytics-counters{display:flex;align-items:center;gap:12px;flex-wrap:wrap}#analytics-counters img{display:block;flex-shrink:0}
