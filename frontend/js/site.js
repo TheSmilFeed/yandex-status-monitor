@@ -1,4 +1,5 @@
-import { trackPage } from './analytics.js';
+import { trackPage, registerAnalytics } from './analytics.js';
+import { liveInternetHit } from './liveinternet.js';
 const legacy = location.hash.match(/^#\/(.*)$/);
 if (legacy) {
   const [page, slug] = legacy[1].split('/');
@@ -6,6 +7,7 @@ if (legacy) {
   if (Object.hasOwn(pages, page)) location.replace('./' + pages[page] + '.html' + (page === 'service' ? '?service=' + encodeURIComponent(slug || '') : ''));
 } else {
   document.querySelector('.skip').addEventListener('click', event => { event.preventDefault(); document.querySelector('main').focus(); document.querySelector('main').scrollIntoView(); });
-  if (!['about','contacts'].includes(document.body.dataset.page)) await import('./app.js');
+  registerAnalytics('liveinternet', () => liveInternetHit(document, screen));
   trackPage(location.pathname + location.search, document.title);
+  if (!['about','contacts'].includes(document.body.dataset.page)) await import('./app.js');
 }
