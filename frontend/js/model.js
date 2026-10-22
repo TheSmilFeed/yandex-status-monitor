@@ -2,12 +2,13 @@ import { config } from '../config.js';
 
 // Справочник задаёт только названия и оформление, никогда — состояние.
 export const catalog = [
+  { slug: 'yandex-main', name: 'Яндекс', group: 'yandex', icon: 'search', tone: 'red', url: 'https://ya.ru/' },
   { slug: 'yandex-mail', name: 'Яндекс Почта', group: 'yandex', icon: 'mail', tone: 'red', url: 'https://mail.yandex.ru/' },
   { slug: 'yandex-market', name: 'Яндекс Маркет', group: 'yandex', icon: 'market', tone: 'yellow', url: 'https://market.yandex.ru/' },
   { slug: 'yandex-food', name: 'Яндекс Еда', group: 'yandex', icon: 'food', tone: 'yellow', url: 'https://eda.yandex.ru/' },
   { slug: 'yandex-go', name: 'Яндекс Go', group: 'yandex', icon: 'go', tone: 'yellow', url: 'https://go.yandex/' },
   { slug: 'yandex-disk', name: 'Яндекс Диск', group: 'yandex', icon: 'disk', tone: 'blue', url: 'https://disk.yandex.ru/' },
-  { slug: 'mospolytech-main', name: 'Основной сайт', group: 'mospolytech', icon: 'poly', tone: 'navy', url: 'https://mospolytech.ru/' },
+  { slug: 'mospolytech-main', name: 'Московский Политех', group: 'mospolytech', icon: 'poly', tone: 'navy', url: 'https://mospolytech.ru/' },
   { slug: 'mospolytech-account', name: 'Личный кабинет', group: 'mospolytech', icon: 'account', tone: 'navy', url: 'https://e.mospolytech.ru/' },
   { slug: 'mospolytech-lms', name: 'LMS', group: 'mospolytech', icon: 'lms', tone: 'navy', url: 'https://online.mospolytech.ru/' },
 ];
@@ -48,4 +49,13 @@ export function historyRows(checks, period, now = Date.now()) {
 }
 export function associatedIncidents(service, incidents) {
   return incidents.filter(i => i.id === service?.incident?.id || (service?.id && i.service_id === service.id) || (i.service_slug && i.service_slug === service?.slug));
+}
+
+// Оценка исторической HTTP-проверки без проверки её свежести сегодня.
+export function availabilityOf(check) {
+  const code = number(check?.http_status);
+  if ([401, 403].includes(code) || check?.status === 'unknown') return 'unknown';
+  if (code !== null && code >= 200 && code < 400) return 'available';
+  if ((code !== null && code >= 400 && code <= 599) || (code === null && check?.is_available === false && check?.status === 'unavailable')) return 'unavailable';
+  return 'unknown';
 }

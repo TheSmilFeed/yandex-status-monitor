@@ -1,13 +1,22 @@
-// Единая точка интеграции счётчиков на всех маршрутах.
-// После получения настоящих ID добавьте официальные сниппеты и адаптеры.
-// До этого никакие запросы в LiveInternet, Top-100 или Mail.ru не отправляются.
+// ЛР3 — LiveInternet, ЛР4 — Sber Ads, ЛР5 — MyTracker.
+// Размещайте здесь только официальные коды, выданные для этого сайта.
+// Видимый счётчик устанавливается в #analytics-counters на каждой странице.
 const adapters = new Map();
+let currentPage;
+const delivered = new Set();
+function deliver(name, adapter) {
+  if (!currentPage || delivered.has(name)) return;
+  try { adapter(currentPage); delivered.add(name); }
+  catch { /* Ошибка счётчика не должна нарушать работу сайта. */ }
+}
 export function registerAnalytics(name, adapter) {
-  if (!['liveinternet', 'top100', 'mailru'].includes(name) || typeof adapter !== 'function') throw new Error('Некорректный адаптер аналитики');
+  if (!['liveinternet', 'sberads', 'mytracker'].includes(name) || typeof adapter !== 'function') throw new Error('Некорректный адаптер аналитики');
   adapters.set(name, adapter);
+  deliver(name, adapter);
 }
 export function trackPage(path, title) {
-  for (const adapter of adapters.values()) {
-    try { adapter({ path, title }); } catch { /* Счётчик не должен нарушать работу мониторинга. */ }
-  }
+  if (currentPage?.path === path) return;
+  currentPage = { path, title };
+  delivered.clear();
+  for (const [name, adapter] of adapters) deliver(name, adapter);
 }

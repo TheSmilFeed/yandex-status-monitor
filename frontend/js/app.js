@@ -1,13 +1,14 @@
 import { config } from '../config.js';
-import { catalog, labels, escapeHTML as e, safeURL, formatDate, number, statusOf, historyRows, associatedIncidents } from './model.js';
+import { catalog, labels, escapeHTML as e, safeURL, formatDate, number, statusOf, historyRows, associatedIncidents, availabilityOf } from './model.js';
 import { getStatus, getIncidents, getHistory, errorText } from './api.js';
-import { trackPage } from './analytics.js';
+import { availabilityChart } from './charts.js';
 
 const main = document.querySelector('main');
-const state = { services: [], incidents: [], loading: true, refreshing: false, statusError: '', incidentError: '', receivedAt: null, selected: 'yandex-mail', period: '24h', history: new Map(), historyError: '', historyLoading: false };
+const state = { services: [], incidents: [], loading: true, refreshing: false, statusError: '', incidentError: '', receivedAt: null, selected: document.body.dataset.page === 'yandex' ? 'yandex-mail' : 'mospolytech-main', period: '24h', history: new Map(), historyError: '', historyLoading: false };
 let historyController;
-let route = readRoute();
+const route = readRoute();
 const paths = {
+  search: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',
   market: '<path d="m5 8 2 12h10l2-12ZM9 8V6a3 3 0 0 1 6 0v2"/>',
   food: '<path d="M7 3v7m-3-7v5a3 3 0 0 0 6 0V3M7 11v10M19 3v18m0-18c-5 3-5 10 0 10"/>',
@@ -21,9 +22,7 @@ const paths = {
 };
 const icon = (key, className = '') => `<svg class="icon ${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[key] || paths.server}</svg>`;
 function readRoute() {
-  const path = location.hash.slice(1) || '/';
-  const parts = path.split('/').filter(Boolean);
-  return { page: parts[0] || 'home', slug: parts[1] || '' };
+  return { page: document.body.dataset.page || 'home', slug: new URLSearchParams(location.search).get('service') || '' };
 }
 function serviceFor(slug) {
   const meta = catalog.find(s => s.slug === slug);
@@ -51,14 +50,14 @@ function serviceCard(service) {
   const status = statusOf(service);
   const check = service.current;
   const response = number(check?.response_time_ms);
-  return `<a class="service-card" href="#/service/${e(service.slug)}"><div class="card-top"><span class="service-icon ${service.tone}">${icon(service.icon)}</span><span class="card-arrow">↗</span></div><h3>${e(service.name)}</h3>${badge(status.code)}<p class="status-explanation">${e(status.note)}</p><div class="card-bottom"><span>${check?.checked_at ? `${formatDate(check.checked_at, true)} МСК` : 'Пока нет проверок'}</span><span>${response === null ? '—' : `${new Intl.NumberFormat('ru-RU').format(response)} мс`}</span></div></a>`;
+  return `<a class="service-card" href="./service.html?service=${encodeURIComponent(service.slug)}"><div class="card-top"><span class="service-icon ${service.tone}">${icon(service.icon)}</span><span class="card-arrow">↗</span></div><h3>${e(service.name)}</h3>${badge(status.code)}<p class="status-explanation">${e(status.note)}</p><div class="card-bottom"><span>${check?.checked_at ? `${formatDate(check.checked_at, true)} МСК` : 'Пока нет проверок'}</span><span>${response === null ? '—' : `${new Intl.NumberFormat('ru-RU').format(response)} мс`}</span></div></a>`;
 }
 function servicesSection(group) {
   const isYandex = group === 'yandex';
-  return `<section class="section" id="${group}">${sectionHead(isYandex ? '01 / ЯНДЕКС' : '03 / УНИВЕРСИТЕТ', isYandex ? 'Сервисы Яндекса' : 'Московский Политех', `<span class="section-caption">${isYandex ? '5 сервисов' : '3 сервиса'} · HTTP-мониторинг</span>`)}${state.loading ? loadSkeleton(isYandex ? 5 : 3) : `<div class="card-grid ${isYandex ? 'five' : 'three'}">${catalog.filter(s => s.group === group).map(c => serviceCard(serviceFor(c.slug))).join('')}</div>`}${isYandex ? '<p class="section-note">Внешние сигналы и жалобы отображаются только при наличии данных. Detector404 пока не подключён.</p>' : '<p class="section-note">Автоматический инцидент открывается после 3 последовательных неудачных проверок.</p>'}</section>`;
+  return `<section class="section" id="${group}">${sectionHead(isYandex ? 'ЯНДЕКС' : 'МОСКОВСКИЙ ПОЛИТЕХ', isYandex ? 'Сервисы Яндекса' : 'Московский Политех', `<span class="section-caption">${isYandex ? '6 сервисов' : '3 сервиса'} · HTTP-мониторинг</span>`)}${state.loading ? loadSkeleton(isYandex ? 6 : 3) : `<div class="card-grid ${isYandex ? 'six' : 'three'}">${catalog.filter(s => s.group === group).map(c => serviceCard(serviceFor(c.slug))).join('')}</div>`}${isYandex ? '<p class="section-note">Внешние сигналы и жалобы отображаются только при наличии данных. Detector404 пока не подключён.</p>' : '<p class="section-note">Автоматический инцидент открывается после 3 последовательных неудачных проверок.</p>'}</section>`;
 }
 function datacenters() {
-  return `<section class="section">${sectionHead('02 / ИНФРАСТРУКТУРА', 'Дата-центры Яндекса', '<span class="section-caption">Открытые источники</span>')}<div class="dc-panel"><div class="dc-intro"><span class="dc-illustration">${icon('server')}</span><h3>Инфраструктура<br>за сервисами</h3><p>Сведения о ЦОДах публикуются только при наличии актуального подтверждённого источника.</p></div><div class="dc-list">${['Владимир', 'Сасово', 'Ивантеевка', 'Мытищи', 'Калуга'].map(name => `<div class="dc-row"><span>${icon('server')}<strong>${name}</strong></span>${badge('unknown', 'Нет данных')}</div>`).join('')}</div></div><p class="section-note">Нет актуальных сведений об инциденте. Отсутствие данных не означает отсутствия проблем.</p></section>`;
+  return `<section class="section">${sectionHead('ИНФРАСТРУКТУРА', 'Дата-центры Яндекса', '<span class="section-caption">Открытые источники</span>')}<div class="dc-panel"><div class="dc-intro"><span class="dc-illustration">${icon('server')}</span><h3>Инфраструктура<br>за сервисами</h3><p>Сведения о ЦОДах публикуются только при наличии актуального подтверждённого источника.</p></div><div class="dc-list">${['Сасово', 'Владимир', 'Калуга', 'Мытищи', 'Ивантеевка'].map(name => `<div class="dc-row"><span>${icon('server')}<strong>${name}</strong></span>${badge('unknown', 'Нет данных')}</div>`).join('')}</div></div><p class="section-note">Нет актуальных сведений об инциденте. Отсутствие данных не означает отсутствия проблем.</p></section>`;
 }
 function incidentCards(items) {
   if (!items.length) return empty('Инцидентов в ответе API нет', 'Это не гарантирует отсутствия проблем: охват мониторинга ограничен.');
@@ -66,11 +65,11 @@ function incidentCards(items) {
 }
 function incidentsSection(full = false, service = null) {
   const items = service ? associatedIncidents(service, state.incidents) : state.incidents;
-  return `<section class="section">${sectionHead('ЖУРНАЛ СОБЫТИЙ', service ? 'Инциденты сервиса' : full ? 'История инцидентов' : 'Последние инциденты', !full && !service ? '<a class="text-link" href="#/history">Вся история ↗</a>' : '')}${state.loading ? loadSkeleton(1) : state.incidentError ? `<div class="notice error" role="alert">${e(state.incidentError)}<button data-action="refresh">Повторить</button></div>` : incidentCards(full || service ? items : items.slice(0, 3))}${service ? '<p class="section-note">Показаны события, которые API позволяет однозначно связать с этим сервисом. Полный журнал доступен в разделе «История».</p>' : ''}</section>`;
+  return `<section class="section">${sectionHead('ЖУРНАЛ СОБЫТИЙ', service ? 'Инциденты сервиса' : full ? 'История инцидентов' : 'Последние инциденты', !full && !service ? '<a class="text-link" href="./history.html">Вся история ↗</a>' : '')}${state.loading ? loadSkeleton(1) : state.incidentError ? `<div class="notice error" role="alert">${e(state.incidentError)}<button data-action="refresh">Повторить</button></div>` : incidentCards(full || service ? items : items.slice(0, 3))}${service ? '<p class="section-note">Показаны события, которые API позволяет однозначно связать с этим сервисом. Полный журнал доступен в разделе «История».</p>' : ''}</section>`;
 }
 function historySection(slug = state.selected, detailed = false) {
   const c = catalog.find(c => c.slug === slug) || catalog[0];
-  return `<section class="section history-section">${sectionHead('ДИНАМИКА ПРОВЕРОК', 'Время ответа', '<span class="section-caption">Миллисекунды · МСК</span>')}<div class="chart-panel"><div class="chart-toolbar">${detailed ? `<strong>${e(c.name)}</strong>` : `<label class="select-label">Сервис<select id="history-service" aria-label="Сервис для графика">${catalog.map(c => `<option value="${c.slug}" ${c.slug === slug ? 'selected' : ''}>${e(c.name)}</option>`).join('')}</select></label>`}<div class="periods" role="group" aria-label="Период графика">${[['24h','24 часа'],['7d','7 дней'],['30d','30 дней'],['all','Все данные']].map(([value,label]) => `<button data-period="${value}" aria-pressed="${state.period === value}">${label}</button>`).join('')}</div></div><div id="chart-content" aria-live="polite">${empty('Загрузка истории', 'Запрашиваем реальные результаты проверок.')}</div></div></section>`;
+  return `<section class="section history-section">${sectionHead('ИСТОРИЯ ПРОВЕРОК', 'Графики доступности', '<span class="section-caption">Результаты HTTP-проверок · МСК</span>')}<div class="chart-panel"><div class="chart-toolbar">${detailed ? `<strong>${e(c.name)}</strong>` : `<label class="select-label">Сервис<select id="history-service" aria-label="Сервис для графика">${catalog.filter(c => detailed || !['yandex','mospolytech'].includes(route.page) || c.group === route.page).map(c => `<option value="${c.slug}" ${c.slug === slug ? 'selected' : ''}>${e(c.name)}</option>`).join('')}</select></label>`}<div class="periods" role="group" aria-label="Период графика">${[['24h','24 часа'],['7d','7 дней'],['30d','30 дней']].map(([value,label]) => `<button data-period="${value}" aria-pressed="${state.period === value}">${label}</button>`).join('')}</div></div><div id="chart-content" aria-live="polite">${empty('Загрузка истории', 'Запрашиваем реальные результаты проверок.')}</div></div></section>`;
 }
 function drawHistory() {
   const target = document.querySelector('#chart-content');
@@ -81,10 +80,10 @@ function drawHistory() {
   const saved = state.history.get(slug);
   if (!saved) return;
   const rows = historyRows(saved.checks, state.period);
-  if (!rows.length) { target.innerHTML = empty('За этот период нет проверок', 'Выберите другой период или дождитесь следующего запуска мониторинга.'); return; }
+  if (!rows.length) { target.innerHTML = empty('За этот период нет проверок', slug === 'yandex-main' ? 'Проверка главной страницы Яндекса пока не подключена к API.' : 'Выберите другой период или дождитесь следующего запуска мониторинга.'); return; }
   const timed = rows.filter(c => number(c.response_time_ms) !== null);
-  const available = rows.filter(c => c.http_status >= 200 && c.http_status < 400).length;
-  const unknown = rows.filter(c => [401,403].includes(c.http_status) || c.status === 'unknown').length;
+  const available = rows.filter(c => availabilityOf(c) === 'available').length;
+  const unknown = rows.filter(c => availabilityOf(c) === 'unknown').length;
   const max = Math.max(100, ...timed.map(c => c.response_time_ms)) * 1.1;
   const start = Date.parse(rows[0].checked_at), end = Date.parse(rows.at(-1).checked_at);
   const x = row => 62 + (end === start ? .5 : (Date.parse(row.checked_at) - start) / (end - start)) * 870;
@@ -97,11 +96,16 @@ function drawHistory() {
   }
   if (segment.length) segments.push(segment);
   const graph = timed.length ? `<svg class="chart" viewBox="0 0 960 246" role="img" aria-label="Время ответа ${e(catalog.find(c=>c.slug===slug)?.name)}: ${rows.length} проверок, от ${e(formatDate(rows[0].checked_at))} до ${e(formatDate(rows.at(-1).checked_at))} МСК"><defs><linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#86c5ff" stop-opacity=".32"/><stop offset="1" stop-color="#86c5ff" stop-opacity=".02"/></linearGradient></defs>${[0,.5,1].map(t => `<path d="M62 ${202-t*170}H932" stroke="#e9edf2"/><text x="48" y="${206-t*170}" text-anchor="end">${Math.round(max*t)}</text>`).join('')}${segments.map(points => `<path d="M${x(points[0])},202 L${points.map(r=>`${x(r)},${y(r)}`).join(' L')} L${x(points.at(-1))},202Z" fill="url(#chart-fill)"/><polyline points="${points.map(r=>`${x(r)},${y(r)}`).join(' ')}" fill="none" stroke="#2e5aa7" stroke-width="2.5"/>`).join('')}${timed.map(r => `<circle cx="${x(r)}" cy="${y(r)}" r="3" fill="${r.http_status >= 200 && r.http_status < 400 ? '#2e5aa7' : '#cc6245'}"><title>${formatDate(r.checked_at)} МСК · ${r.response_time_ms} мс · HTTP ${e(r.http_status ?? '—')}</title></circle>`).join('')}<text x="62" y="235">${formatDate(rows[0].checked_at)}</text><text x="932" y="235" text-anchor="end">${formatDate(rows.at(-1).checked_at)}</text></svg>` : empty('Нет измерений времени ответа', 'Проверки есть, но response_time_ms отсутствует.');
-  target.innerHTML = `<div class="chart-stats"><span><b>${rows.length}</b> проверок в выборке</span><span><i class="dot green"></i><b>${available}</b> HTTP 200–399</span><span><i class="dot gray"></i><b>${unknown}</b> неопределённых</span></div>${graph}<div class="chart-foot"><span>Реальные измерения, без интерполяции пропусков более 12 минут.</span><span>Получено ${saved.checks.length} из последних записей API · лимит запроса ${config.historyLimit}</span></div><p class="section-note">Период фильтрует полученную выборку и не гарантирует полное покрытие. Процент uptime не рассчитывается по неполным данным.</p>${route.page === 'service' || route.page === 'history' ? `<details class="history-details"><summary>Таблица проверок (${rows.length})</summary><div class="table-scroll"><table><thead><tr><th>Время, МСК</th><th>HTTP</th><th>Отклик</th><th>Состояние проверки</th></tr></thead><tbody>${[...rows].reverse().map(r => `<tr><td>${formatDate(r.checked_at)}</td><td>${e(r.http_status ?? '—')}</td><td>${number(r.response_time_ms) === null ? '—' : `${r.response_time_ms} мс`}</td><td>${e(labels[r.status] || labels.unknown)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+  target.innerHTML = `<div class="chart-stats"><span><b>${rows.length}</b> проверок в выборке</span><span><i class="dot green"></i><b>${available}</b> HTTP 200–399</span><span><i class="dot gray"></i><b>${unknown}</b> неопределённых</span></div>${availabilityChart(rows, state.period, slug)}<h3 class="chart-subtitle">Время ответа</h3>${graph}<div class="chart-foot"><span>Реальные измерения, без интерполяции пропусков более 12 минут.</span><span>Получено ${saved.checks.length} из последних записей API · лимит запроса ${config.historyLimit}</span></div><p class="section-note">Период фильтрует полученную выборку и не гарантирует полное покрытие. Процент uptime не рассчитывается по неполным данным.</p>${route.page === 'service' || route.page === 'history' ? `<details class="history-details"><summary>Таблица проверок (${rows.length})</summary><div class="table-scroll"><table><thead><tr><th>Время, МСК</th><th>HTTP</th><th>Отклик</th><th>HTTP-доступность</th></tr></thead><tbody>${[...rows].reverse().map(r => `<tr><td>${formatDate(r.checked_at)}</td><td>${e(r.http_status ?? '—')}</td><td>${number(r.response_time_ms) === null ? '—' : `${r.response_time_ms} мс`}</td><td>${e({available:'Доступен по HTTP',unavailable:'Ошибка HTTP',unknown:'Не определено'}[availabilityOf(r)])}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
 }
 async function loadHistory(force = false) {
   if (!document.querySelector('#chart-content')) return;
   const slug = route.page === 'service' ? route.slug : state.selected;
+  if (!state.loading && !state.statusError && !state.services.some(s => s.slug === slug)) {
+    historyController?.abort(); state.historyLoading = false; state.historyError = '';
+    state.history.set(slug, { checks: [], fetchedAt: Date.now() }); drawHistory(); return;
+  }
+  if (state.loading) return;
   const cached = state.history.get(slug);
   historyController?.abort();
   state.historyError = '';
@@ -113,7 +117,7 @@ async function loadHistory(force = false) {
   finally { if (historyController === controller && !controller.signal.aborted) { state.historyLoading = false; drawHistory(); } }
 }
 function newsSection(full = false) {
-  return `<section class="section">${sectionHead('НОВОСТИ', full ? 'Новости и сообщения' : 'Последние новости', full ? '' : '<a class="text-link" href="#/news">Все новости ↗</a>')}<div class="news-placeholder"><span class="news-symbol">${icon('news')}</span><div><h3>Проверенные новости появятся здесь</h3><p>Новостной источник пока не подключён. Здесь будут короткие обзоры официальных сообщений и публикаций СМИ со ссылками на оригиналы.</p></div><span class="pill">Скоро</span></div>${full ? '<div class="prose"><h2>Что попадёт в ленту</h2><p>Сообщения о сбоях и восстановлении сервисов, события в дата-центрах Яндекса и новости цифровых сервисов Московского Политеха. Официальные сообщения будут отмечены отдельно.</p><p>Полные тексты статей не копируются. Повторные публикации будут объединяться по ссылке и содержанию. Сейчас API не предоставляет новости, поэтому лента пуста.</p></div>' : ''}</section>`;
+  return `<section class="section">${sectionHead('НОВОСТИ', full ? 'Новости и сообщения' : 'Последние новости', full ? '' : '<a class="text-link" href="./news.html">Все новости ↗</a>')}<div class="news-placeholder"><span class="news-symbol">${icon('news')}</span><div><h3>Проверенные новости появятся здесь</h3><p>Новостной источник пока не подключён. Здесь будут короткие обзоры официальных сообщений и публикаций СМИ со ссылками на оригиналы.</p></div><span class="pill">Скоро</span></div>${full ? '<div class="prose"><h2>Что попадёт в ленту</h2><p>Сообщения о сбоях и восстановлении сервисов, события в дата-центрах Яндекса и новости цифровых сервисов Московского Политеха. Официальные сообщения будут отмечены отдельно.</p><p>Полные тексты статей не копируются. Повторные публикации будут объединяться по ссылке и содержанию. Сейчас API не предоставляет новости, поэтому лента пуста.</p></div>' : ''}</section>`;
 }
 function hero() {
   return `<section class="hero"><div><h1>Что там<br>по серверам <span>Яндекса?</span></h1><p>Мониторинг состояния инфраструктуры<br class="desktop-break"> и цифровых сервисов</p><div class="hero-facts"><span>Яндекс</span><i></i><span>Московский Политех</span><i></i><span>Дата-центры</span></div></div><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="art-label label-http">HTTP / STATUS</span><div class="server-stack"><div class="server-unit"><span></span><span></span><b></b></div><div class="server-unit"><span></span><span></span><b></b></div><div class="server-unit"><span></span><span></span><b></b></div><div class="server-base"></div></div><div class="signal-tile">↗</div><span class="art-label label-interval">ПРОВЕРКИ КАЖДЫЕ 5 МИН</span></div></section>`;
@@ -124,50 +128,23 @@ function updateBar() {
 function pageTitle(kicker, title, description) { return `<div class="page-title"><p class="eyebrow">${kicker}</p><h1>${title}</h1><p>${description}</p></div>`; }
 function detail() {
   const service = serviceFor(route.slug);
-  if (!service) return `${pageTitle('404', 'Сервис не найден', 'Такого сервиса нет в текущем каталоге.')}<a class="button" href="#/">На главную</a>`;
+  if (!service) return `${pageTitle('404', 'Сервис не найден', 'Такого сервиса нет в текущем каталоге.')}<a class="button" href="./index.html">На главную</a>`;
   const status = statusOf(service), check = service.current;
   const source = safeURL(service.url);
-  return `<a class="back-link" href="#/${service.group}">← Все сервисы ${service.group === 'yandex' ? 'Яндекса' : 'Мосполитеха'}</a><div class="detail-title"><span class="service-icon ${service.tone}">${icon(service.icon)}</span><div><p class="eyebrow">${service.group === 'yandex' ? 'ЯНДЕКС' : 'МОСКОВСКИЙ ПОЛИТЕХ'}</p><h1>${e(service.name)}</h1></div>${badge(status.code)}</div>${connectionNotice()}<p class="detail-note">${e(status.note)}. HTTP 200–399 не подтверждает работоспособность входа, оплаты, отправки сообщений и других функций.</p><div class="metric-grid"><div><span>HTTP status</span><b>${e(check?.http_status ?? '—')}</b></div><div><span>Время ответа</span><b>${number(check?.response_time_ms) === null ? '—' : `${check.response_time_ms} <small>мс</small>`}</b></div><div><span>Последняя проверка, МСК</span><b class="date-metric">${formatDate(check?.checked_at)}</b></div><div><span>Жалобы из внешних источников</span><b class="date-metric">${number(check?.complaints_count) === null ? 'Нет данных' : check.complaints_count}</b></div></div>${historySection(service.slug, true)}${incidentsSection(true, service)}<section class="section">${sectionHead('ИСТОЧНИКИ', 'Источники информации')}<div class="source-grid"><div><h3>Автоматическая HTTP-проверка</h3><p>Cloudflare Worker, запуск по расписанию каждые 5 минут.</p>${source ? `<a href="${e(source)}" target="_blank" rel="noopener noreferrer">Открыть проверяемый сайт ↗</a>` : ''}</div><div><h3>Внешние сигналы</h3><p>${check?.external_status ? `Значение API: ${e(check.external_status)}. Ссылка на источник в текущем ответе не предоставлена.` : 'Нет данных из внешних источников.'}</p><p>Detector404 не подключён.${['yandex-mail','yandex-disk'].includes(service.slug) ? ' Интеграция официального статуса Яндекс 360 запланирована.' : ''}</p></div></div></section>`;
-}
-function about() {
-  return `${pageTitle('О ПРОЕКТЕ', 'Как это работает', 'Здесь можно посмотреть, отвечают ли сайты Яндекса и Московского Политеха, и когда с ними возникали проблемы.')}
-    <div class="about-grid">
-      <div class="prose">
-        <h2>Проверяем каждые 5 минут</h2>
-        <p>Сервер отправляет запрос к каждому сайту и сохраняет код ответа и время ожидания. На странице появляются результаты последних проверок. Кнопка «Обновить» загружает эти результаты, а не запускает новую проверку.</p>
-        <h2>Что означает статус</h2>
-        <p>Зелёный статус означает, что сайт ответил на запрос кодом HTTP 200–399. При этом вход в аккаунт, отправка писем, оплата и другие функции могут работать с ошибками — их такая проверка не охватывает.</p>
-        <p>Коды 401 и 403 не считаются сбоем: сайт мог ограничить доступ для автоматических запросов. В этом случае мы показываем «Нет данных».</p>
-        <h2>Когда появляется инцидент</h2>
-        <p>Для сервисов Мосполитеха запись о сбое появляется после трёх неудачных проверок подряд. Когда сайт снова отвечает, инцидент закрывается.</p>
-        <p>Для Яндекса одной ошибки HTTP недостаточно, чтобы объявить массовый сбой. Для этого нужно подтверждение из внешних источников. Пока доступны только HTTP-проверки.</p>
-        <h2>Что стоит учитывать</h2>
-        <p>Проверки выполняются из сети Cloudflare. У вас сайт может открываться иначе. Если последней проверке больше 15 минут, её результат отмечается как устаревший.</p>
-        <p>График показывает полученные измерения. Выбранный период может быть покрыт не полностью — количество записей указано под графиком.</p>
-        <p>Новости и сведения о дата-центрах пока не подключены. Время на всех страницах указано по Москве.</p>
-      </div>
-      <aside class="about-aside">
-        <h2>Откуда берутся данные</h2>
-        <p>Результаты проверок сохраняются в базе и доступны через открытый API.</p>
-        <a href="${config.apiBase}/api/status" target="_blank" rel="noopener noreferrer">Открыть данные API ↗</a>
-        <hr>
-        <h3>Обновление страницы</h3>
-        <p>Пока вкладка открыта, результаты обновляются раз в минуту. Время последней проверки указано на карточке каждого сервиса.</p>
-      </aside>
-    </div>`;
+  return `<a class="back-link" href="./${service.group}.html">← Все сервисы ${service.group === 'yandex' ? 'Яндекса' : 'Мосполитеха'}</a><div class="detail-title"><span class="service-icon ${service.tone}">${icon(service.icon)}</span><div><p class="eyebrow">${service.group === 'yandex' ? 'ЯНДЕКС' : 'МОСКОВСКИЙ ПОЛИТЕХ'}</p><h1>${e(service.name)}</h1></div>${badge(status.code)}</div>${connectionNotice()}<p class="detail-note">${e(status.note)}. HTTP 200–399 не подтверждает работоспособность входа, оплаты, отправки сообщений и других функций.</p><div class="metric-grid"><div><span>HTTP status</span><b>${e(check?.http_status ?? '—')}</b></div><div><span>Время ответа</span><b>${number(check?.response_time_ms) === null ? '—' : `${check.response_time_ms} <small>мс</small>`}</b></div><div><span>Последняя проверка, МСК</span><b class="date-metric">${formatDate(check?.checked_at)}</b></div><div><span>Жалобы из внешних источников</span><b class="date-metric">${number(check?.complaints_count) === null ? 'Нет данных' : check.complaints_count}</b></div></div>${historySection(service.slug, true)}${incidentsSection(true, service)}<section class="section">${sectionHead('ИСТОЧНИКИ', 'Источники информации')}<div class="source-grid"><div><h3>Автоматическая HTTP-проверка</h3><p>Cloudflare Worker, запуск по расписанию каждые 5 минут.</p>${source ? `<a href="${e(source)}" target="_blank" rel="noopener noreferrer">Открыть проверяемый сайт ↗</a>` : ''}</div><div><h3>Внешние сигналы</h3><p>${check?.external_status ? `Значение API: ${e(check.external_status)}. Ссылка на источник в текущем ответе не предоставлена.` : 'Нет данных из внешних источников.'}</p><p>Detector404 не подключён.${['yandex-mail','yandex-disk'].includes(service.slug) ? ' Интеграция официального статуса Яндекс 360 запланирована.' : ''}</p></div></div></section>`;
 }
 function render() {
   const active = document.activeElement?.id;
   const tableOpen = document.querySelector('.history-details')?.open;
-  document.querySelectorAll('[data-nav]').forEach(a => { const selected = a.dataset.nav === route.page; a.classList.toggle('active', selected); if (selected) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
+  document.querySelectorAll('[data-nav]').forEach(a => { const selected = a.dataset.nav === (route.page === 'service' ? serviceFor(route.slug)?.group : route.page); a.classList.toggle('active', selected); if (selected) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
   let content;
-  if (route.page === 'home') content = `${hero()}${updateBar()}${connectionNotice()}${summary()}${servicesSection('yandex')}${datacenters()}${servicesSection('mospolytech')}${historySection()}${incidentsSection()}${newsSection()}`;
+  if (route.page === 'home') content = `${hero()}${updateBar()}${connectionNotice()}${summary()}${servicesSection('mospolytech')}${servicesSection('yandex')}${historySection()}${datacenters()}${incidentsSection()}`;
   else if (['yandex','mospolytech'].includes(route.page)) content = `${pageTitle('СТАТУС СЕРВИСОВ', route.page === 'yandex' ? 'Яндекс' : 'Московский Политех', 'Результаты автоматических проверок и доступные сигналы об инцидентах.')}${updateBar()}${connectionNotice()}${servicesSection(route.page)}${route.page === 'yandex' ? datacenters() : ''}${historySection()}`;
   else if (route.page === 'history') content = `${pageTitle('ПРОВЕРКИ И СОБЫТИЯ', 'История мониторинга', 'Реальные измерения, открытые и завершённые инциденты.')}${updateBar()}${historySection()}${incidentsSection(true)}`;
   else if (route.page === 'news') content = `${pageTitle('ОТКРЫТЫЕ ИСТОЧНИКИ', 'Новости', 'Контекст событий, официальные сообщения и публикации СМИ.')}${newsSection(true)}`;
-  else if (route.page === 'about') content = about();
+
   else if (route.page === 'service') content = detail();
-  else content = `${pageTitle('404', 'Страница не найдена', 'Проверьте адрес или вернитесь на главную.')}<a class="button" href="#/">На главную</a>`;
+  else content = `${pageTitle('404', 'Страница не найдена', 'Проверьте адрес или вернитесь на главную.')}<a class="button" href="./index.html">На главную</a>`;
   main.innerHTML = content;
   if (active) document.getElementById(active)?.focus({ preventScroll: true });
   drawHistory();
@@ -190,15 +167,8 @@ main.addEventListener('click', event => {
   if (button.dataset.period) { state.period = button.dataset.period; document.querySelectorAll('[data-period]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.period===state.period))); drawHistory(); }
 });
 main.addEventListener('change', event => { if (event.target.id === 'history-service') { state.selected = event.target.value; loadHistory(); } });
-document.querySelector('.skip').addEventListener('click', event => { event.preventDefault(); main.focus(); main.scrollIntoView(); });
-window.addEventListener('hashchange', () => {
-  historyController?.abort(); route = readRoute();
-  if (route.page === 'mospolytech') state.selected = 'mospolytech-main';
-  if (route.page === 'yandex') state.selected = 'yandex-mail';
-  state.historyLoading = false; state.historyError = '';
-  document.title = `${route.page === 'service' ? serviceFor(route.slug)?.name || 'Сервис' : ({home:'Главная', yandex:'Яндекс', mospolytech:'Мосполитех', history:'История', news:'Новости', about:'О проекте'}[route.page] || 'Страница')} · Что там по серверам Яндекса?`;
-  render(); loadHistory(); main.focus({ preventScroll: true }); window.scrollTo(0,0); trackPage(location.hash || '#/', document.title);
-});
+
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, config.refreshMs);
-render(); refresh(); trackPage(location.hash || '#/', document.title);
+if (route.page === 'service') document.title = `${serviceFor(route.slug)?.name || 'Сервис'} · Что там по серверам Яндекса?`;
+render(); refresh();
